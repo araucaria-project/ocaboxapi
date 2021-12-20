@@ -34,13 +34,19 @@ class Config:
     def read_config(self, source: Optional[Iterable[str]] = None) -> None:
         if not source:
             source = [
-                os.path.join(os.path.dirname(__file__), 'default.cfg.yaml')
+                os.path.join(os.path.dirname(__file__), 'default.cfg.yaml'),
+                os.path.expanduser('~/ocabox.cfg.yaml'),
+                './ocabox.cfg.yaml'
             ]
         config = {}
         for src in source:
-            with open(src) as fd:
-                y = yaml.safe_load(fd)
-                config.update(y)
+            try:
+                with open(src) as fd:
+                    print('Loading configuration from: ', src)
+                    y = yaml.safe_load(fd)
+                    config.update(y)
+            except IOError:
+                pass
         # expand includes
         for k in config.keys():
             self.expand_includes(config, k)
