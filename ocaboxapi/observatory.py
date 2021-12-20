@@ -59,6 +59,35 @@ class Component:
         return _component_classes[kind](sys_id=sys_id, parent=parent)
 
 
+class Observatory(Component):
+    """Observatory - root device in devices tree
+
+    Attributes:
+        configuration (Config): Optional configuration, by default configuration will be loaded from following files:
+              ~/ocabox.cfg.yaml
+              ./ocabox.cfg.yaml
+              <package_path>/ocaboxapi/default.cfg.yaml
+            Later overwrites former
+    """
+
+    def __init__(self, configuration: Optional[Config] = None):
+        if configuration is None:
+            configuration = Config.global_instance()
+        self.config = configuration
+        self.preset = 'default'
+        super().__init__('obs', None)
+
+    def connect(self, preset: Optional[str] = 'default') -> None:
+        """
+        Connect to servers if needed, builds Devices tree
+        Args:
+            preset: name of the preset from config
+        """
+        self.preset = preset
+        options = self.config.data[preset]['observatory']
+        self._setup(options)
+
+
 class Device(Component):
     """Common methods across all devices.
 
@@ -177,35 +206,6 @@ class Device(Component):
     def supportedactions(self) -> List[str]:
         """Get list of action names supported by this driver."""
         return self._get("supportedactions")
-
-
-class Observatory(Device):
-    """Observatory - root device in devices tree
-
-    Attributes:
-        configuration (Config): Optional configuration, by default configuration will be loaded from following files:
-              ~/ocabox.cfg.yaml
-              ./ocabox.cfg.yaml
-              <package_path>/ocaboxapi/default.cfg.yaml
-            Later overwrites former
-    """
-
-    def __init__(self, configuration: Optional[Config] = None):
-        if configuration is None:
-            configuration = Config.global_instance()
-        self.config = configuration
-        self.preset = 'default'
-        super().__init__('obs', None)
-
-    def connect(self, preset: Optional[str] = 'default') -> None:
-        """
-        Connect to servers if needed, builds Devices tree
-        Args:
-            preset: name of the preset from config
-        """
-        self.preset = preset
-        options = self.config.data[preset]['observatory']
-        self._setup(options)
 
 
 class Switch(Device):
