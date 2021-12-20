@@ -5,16 +5,15 @@ with open("README.md", "r") as f:
     long_description = f.read()
 
 setuptools.setup(
-    name="Alpyca",
-    description="Python interface for ASCOM Alpaca.",
+    name="ocabox",
+    description="Python interface for OCA Telescopes.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Ethan Chappel",
-    url="https://github.com/EthanChappel/Alpyca",
-    version="1.0.0b1",
+    url="https://github.com/araucaria-project/ocabox",
+    version="2.0.0",
     license="LICENSE.txt",
-    py_modules=["alpaca"],
-    install_requires=["requests", "python-dateutil"],
+    py_modules=["ocabox"],
+    install_requires=["requests", "python-dateutil", 'pyyaml'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "Development Status :: 4 - Beta",

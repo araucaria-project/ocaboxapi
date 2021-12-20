@@ -1,12 +1,12 @@
 ## Example usage
 
-from ocaboxapi import Observatory
+from api import Observatory
 
 observatory = Observatory()
 
 observatory.connect('alpaca')
 
-luke = observatory.telescopes['ls']
+luke = observatory.luke_telescope
 
-luke.mount.slewtocoordinates(11.4, -52.239)
-luke.mount.park()
+luke.slewtocoordinates(11.4, -52.239)
+luke.park()

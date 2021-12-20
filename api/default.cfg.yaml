@@ -1,0 +1,29 @@
+default:
+  include: alpaca-simulated
+
+alpaca-simulated:
+  observatory:
+    name: Simulated ASA observatory
+    lon: 24.627222    # Paranal
+    lat: -70.404167
+    elev: 2635.0
+    components:
+      ls:
+        kind: telescope
+        name: Luke Skywalker imaginary telescope
+        protocol: alpaca
+        address: http://localhost:1111/api/v1/
+        device_number: 0
+        components:
+          derotator:
+            kind: rotator
+            device_number: 0  #  address will be taken from parent if not provided
+          dome:
+            kind: dome
+            # default device_number is 0
+          ccd:
+            kind: camera
+            device_number: 0
+          guidercam:
+            kind: camera
+            device_number: 1

@@ -1,1 +1,2 @@
-"""Python interface for ASCOM Alpaca."""
+"""Python interface for OCA telescopes."""
+from api.observatory import Observatory

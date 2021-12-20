@@ -1,60 +1,100 @@
-"""Wraps the HTTP requests for the ASCOM Alpaca API into pythonic classes with methods.
-
-Attributes:
-    DEFAULT_API_VERSION (int): Default Alpaca API spec to use if none is specified when
-    needed.
-
-"""
-
 from datetime import datetime
-from typing import Optional, Union, List, Dict, Mapping, Any
-import dateutil.parser
-import requests
+from typing import Optional, Union, List, MutableMapping, Any
+
+from api.config import Config
+from api.connectors import Connector
 
 
-DEFAULT_API_VERSION = 1
+class Component:
+    """Base class for all elements of device tree
+    """
+    def __init__(self, sys_id: str, parent: Union['Component', None]) -> None:
+        self._sys_id: str = sys_id
+        self.parent: Component = parent
+        self.component_options = {}
+        self._connector: Optional[Connector] = None
+        self.children = {}
+
+    def _setup(self, options: dict):
+        self.component_options: MutableMapping = options.copy()
+        self.name = self.component_options.get('name', self._sys_id)
+        try:
+            self._connector = Connector.create_connector(self.component_options['protocol'])
+        except KeyError:
+            pass
+        try:
+            child_options = self.component_options.pop('components')
+        except KeyError:
+            child_options = {}
+        for cid, op in child_options:
+            child = self._create_component(kind=op['kind'], sys_id=self._sys_id + '.' + cid, parent=self)
+            self.children[cid] = child
+            child._setup(op)
+
+    @property
+    def connector(self) -> Connector:
+        if self._connector is not None:
+            return self._connector
+        else:
+            return self.parent.connector
+
+    def get_option_recursive(self, option):
+        try:
+            return self.component_options[option]
+        except KeyError:
+            if self.parent is None:
+                return None
+            else:
+                return self.parent.get_option_recursive(option)
+
+    def __getattribute__(self, name: str) -> Any:
+        """Access to children as another members"""
+        return self.children.get(name, super().__getattribute__(name))
+
+    @classmethod
+    def _create_component(cls, kind: str, sys_id: str, parent: 'Component') -> 'Component':
+        return _component_classes[kind](sys_id=sys_id, parent=parent)
 
 
-class Device:
-    """Common methods across all ASCOM Alpaca devices.
+class Device(Component):
+    """Common methods across all devices.
 
     Attributes:
-        address (str): Domain name or IP address of Alpaca server.
-            Can also specify port number if needed.
-        device_type (str): One of the recognised ASCOM device types
-            e.g. telescope (must be lower case).
-        device_number (int): Zero based device number as set on the server (0 to
-            4294967295).
-        protocall (str): Protocall used to communicate with Alpaca server.
-        api_version (int): Alpaca API version.
-        base_url (str): Basic URL to easily append with commands.
-
+        sys_id (str): system ID of device
+        parent (Component): The parent component in devices tree
     """
+    CURRENT = 0
+    PREVIOUS = 1
+    READ_TIME = 2
+    MODIFY_TIME = 3
 
-    def __init__(
-        self,
-        address: str,
-        device_type: str,
-        device_number: int,
-        protocall: str,
-        api_version: int,
-    ):
+    def __init__(self, sys_id: str, parent: Union['Component', None]) -> None:
         """Initialize Device object."""
-        self.address = address
-        self.device_type = device_type
-        self.device_number = device_number
-        self.api_version = api_version
-        self.base_url = "%s://%s/api/v%d/%s/%d" % (
-            protocall,
-            address,
-            api_version,
-            device_type,
-            device_number,
-        )
+        super().__init__(sys_id=sys_id, parent=parent)
+
+    def _get(self, attribute: str, **data):
+        """Send an request and check response for errors.
+
+        Args:
+            attribute (str): Attribute to get from server.
+            **data: Data to send with request.
+
+        """
+        return self.connector.get(self, attribute, **data)
+
+    def _put(self, attribute: str, **data):
+        """Send an HTTP PUT request to an Alpaca server and check response for errors.
+
+        Args:
+            attribute (str): Attribute to put to server.
+            **data: Data to send with request.
+
+        """
+        return self.connector.put(self, attribute, **data)
 
     def action(self, Action: str, *Parameters):
         """Access functionality beyond the built-in capabilities of the ASCOM device interfaces.
-        
+
         Args:
             Action (str): A well known name that represents the action to be carried out.
             *Parameters: List of required parameters or empty if none are required.
@@ -76,7 +116,7 @@ class Device:
 
     def commandbool(self, Command: str, Raw: bool):
         """Transmit an arbitrary string to the device and wait for a boolean response.
-        
+
         Args:
             Command (str): The literal command string to be transmitted.
             Raw (bool): If true, command is transmitted 'as-is'.
@@ -105,9 +145,9 @@ class Device:
             Connected (bool): Set True to connect to device hardware.
                 Set False to disconnect from device hardware.
                 Set None to get connected state (default).
-        
+
         """
-        if Connected == None:
+        if Connected is None:
             return self._get("connected")
         self._put("connected", Connected=Connected)
 
@@ -135,56 +175,38 @@ class Device:
         """Get list of action names supported by this driver."""
         return self._get("supportedactions")
 
-    def _get(self, attribute: str, **data):
-        """Send an HTTP GET request to an Alpaca server and check response for errors.
 
-        Args:
-            attribute (str): Attribute to get from server.
-            **data: Data to send with request.
-        
+class Observatory(Device):
+    """Observatory - root device in devices tree
+
+    Attributes:
+        configuration (Config): Optional configuration, by default configuration will be loaded from following files:
+              ~/ocabox.cfg.yaml
+              ./ocabox.cfg.yaml
+              <package_path>/api/default.cfg.yaml
+            Later overwrites former
+    """
+
+    def __init__(self, configuration: Optional[Config] = None):
+        if configuration is None:
+            configuration = Config.global_instance()
+        self.config = configuration
+        self.preset = 'default'
+        super().__init__('obs', None)
+
+    def connect(self, preset: Optional[str] = 'default') -> None:
         """
-        response = requests.get("%s/%s" % (self.base_url, attribute), data=data)
-        self.__check_error(response)
-        return response.json()["Value"]
-
-    def _put(self, attribute: str, **data):
-        """Send an HTTP PUT request to an Alpaca server and check response for errors.
-
+        Connect to servers if needed, builds Devices tree
         Args:
-            attribute (str): Attribute to put to server.
-            **data: Data to send with request.
-        
+            preset: name of the preset from config
         """
-        response = requests.put("%s/%s" % (self.base_url, attribute), data=data)
-        self.__check_error(response)
-        return response.json()
-
-    def __check_error(self, response: requests.Response):
-        """Check response from Alpaca server for Errors.
-
-        Args:
-            response (Response): Response from Alpaca server to check.
-
-        """
-        j = response.json()
-        if j["ErrorNumber"] != 0:
-            raise NumericError(j["ErrorNumber"], j["ErrorMessage"])
-        elif response.status_code == 400 or response.status_code == 500:
-            raise ErrorMessage(j["Value"])
+        self.preset = preset
+        options = self.config.data[preset]['observatory']
+        self._setup(options)
 
 
 class Switch(Device):
     """Switch specific methods."""
-
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize Switch object."""
-        super().__init__(address, "switch", device_number, protocall, api_version)
 
     def maxswitch(self) -> int:
         """Count of switch devices managed by this driver.
@@ -349,18 +371,6 @@ class Switch(Device):
 class SafetyMonitor(Device):
     """Safety monitor specific methods."""
 
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize SafetyMonitor object."""
-        super().__init__(
-            address, "safetymonitor", device_number, protocall, api_version
-        )
-
     def issafe(self) -> bool:
         """Indicate whether the monitored state is safe for use.
 
@@ -373,16 +383,6 @@ class SafetyMonitor(Device):
 
 class Dome(Device):
     """Dome specific methods."""
-
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize Dome object."""
-        super().__init__(address, "dome", device_number, protocall, api_version)
 
     def altitude(self) -> float:
         """Dome altitude.
@@ -527,7 +527,7 @@ class Dome(Device):
             True or False value in not set.
         
         """
-        if Slaved == None:
+        if Slaved is None:
             return self._get("slaved")
         self._put("slaved", Slaved=Slaved)
 
@@ -613,16 +613,6 @@ class Dome(Device):
 class Camera(Device):
     """Camera specific methods."""
 
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize Camera object."""
-        super().__init__(address, "camera", device_number, protocall, api_version)
-
     def bayeroffsetx(self) -> int:
         """Return the X offset of the Bayer matrix, as defined in SensorType."""
         return self._get("bayeroffsetx")
@@ -641,7 +631,7 @@ class Camera(Device):
             Binning factor for the X axis.
         
         """
-        if BinX == None:
+        if BinX is None:
             return self._get("binx")
         self._put("binx", BinX=BinX)
 
@@ -655,7 +645,7 @@ class Camera(Device):
             Binning factor for the Y axis.
         
         """
-        if BinY == None:
+        if BinY is None:
             return self._get("biny")
         self._put("biny", BinY=BinY)
 
@@ -725,7 +715,7 @@ class Camera(Device):
             Current cooler on/off state.
         
         """
-        if CoolerOn == None:
+        if CoolerOn is None:
             return self._get("cooleron")
         self._put("cooleron", CoolerOn=CoolerOn)
 
@@ -759,7 +749,7 @@ class Camera(Device):
             Whether Fast Readout Mode is enabled.
 
         """
-        if FastReadout == None:
+        if FastReadout is None:
             return self._get("fastreadout")
         self._put("fastreadout", FastReadout=FastReadout)
 
@@ -785,7 +775,7 @@ class Camera(Device):
             Index into the Gains array for the selected camera gain.
         
         """
-        if Gain == None:
+        if Gain is None:
             return self._get("gain")
         self._put("gain", Gain=Gain)
 
@@ -910,7 +900,7 @@ class Camera(Device):
             Current subframe width.
         
         """
-        if NumX == None:
+        if NumX is None:
             return self._get("numx")
         self._put("numx", NumX=NumX)
 
@@ -918,14 +908,14 @@ class Camera(Device):
         """Set or return the current subframe height.
         
         Args:
-            NumX (int): Subframe height, if binning is active, value is in binned
+            NumY (int): Subframe height, if binning is active, value is in binned
                 pixels.
         
         Returns:
             Current subframe height.
         
         """
-        if NumY == None:
+        if NumY is None:
             return self._get("numy")
         self._put("numy", NumY=NumY)
 
@@ -950,7 +940,7 @@ class Camera(Device):
 
     def readoutmode(self, ReadoutMode: Optional[int] = None) -> int:
         """Indicate the canera's readout mode as an index into the array ReadoutModes."""
-        if ReadoutMode == None:
+        if ReadoutMode is None:
             return self._get("readoutmode")
         self._put("readoutmode", ReadoutMode=ReadoutMode)
 
@@ -987,7 +977,7 @@ class Camera(Device):
             Camera's cooler setpoint (degrees Celsius).
         
         """
-        if SetCCDTemperature == None:
+        if SetCCDTemperature is None:
             return self._get("setccdtemperature")
         self._put("setccdtemperature", SetCCDTemperature=SetCCDTemperature)
 
@@ -1002,7 +992,7 @@ class Camera(Device):
             current value. If binning is active, value is in binned pixels.
         
         """
-        if StartX == None:
+        if StartX is None:
             return self._get("startx")
         self._put("startx", StartX=StartX)
 
@@ -1017,7 +1007,7 @@ class Camera(Device):
             current value. If binning is active, value is in binned pixels.
         
         """
-        if StartY == None:
+        if StartY is None:
             return self._get("starty")
         self._put("starty", StartY=StartY)
 
@@ -1063,16 +1053,6 @@ class Camera(Device):
 class FilterWheel(Device):
     """Filter wheel specific methods."""
 
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize FilterWheel object."""
-        super().__init__(address, "filterwheel", device_number, protocall, api_version)
-
     def focusoffsets(self) -> List[int]:
         """Filter focus offsets.
 
@@ -1101,23 +1081,13 @@ class FilterWheel(Device):
             Returns the current filter wheel position.
         
         """
-        if Position == None:
+        if Position is None:
             return self._get("position")
         self._put("position", Position=Position)
 
 
 class Telescope(Device):
     """Telescope specific methods."""
-
-    def __init__(
-        self,
-        address: str,
-        device_number: int,
-        protocall: str = "http",
-        api_version: int = DEFAULT_API_VERSION,
-    ):
-        """Initialize Telescope object."""
-        super().__init__(address, "telescope", device_number, protocall, api_version)
 
     def alignmentmode(self):
         """Return the current mount alignment mode.
@@ -1347,7 +1317,7 @@ class Telescope(Device):
             not set.
         
         """
-        if DeclinationRate == None:
+        if DeclinationRate is None:
             return self._get("declinationrate")
         self._put("declinationrate", DeclinationRate=DeclinationRate)
 
@@ -1363,7 +1333,7 @@ class Telescope(Device):
             coordinates.
 
         """
-        if DoesRefraction == None:
+        if DoesRefraction is None:
             return self._get("doesrefraction")
         self._put("doesrefraction", DoesRefraction=DoesRefraction)
 
@@ -1397,7 +1367,7 @@ class Telescope(Device):
             Current declination rate offset for telescope guiding if not set.
 
         """
-        if GuideRateDeclination == None:
+        if GuideRateDeclination is None:
             return self._get("guideratedeclination")
         self._put("guideratedeclination", GuideRateDeclination=GuideRateDeclination)
 
@@ -1412,7 +1382,7 @@ class Telescope(Device):
             Current right ascension rate offset for telescope guiding if not set.
 
         """
-        if GuideRateRightAscension == None:
+        if GuideRateRightAscension is None:
             return self._get("guideraterightascension")
         self._put(
             "guideraterightascension", GuideRateRightAscension=GuideRateRightAscension
@@ -1449,7 +1419,7 @@ class Telescope(Device):
             Telescope's right ascension tracking rate if not set.
 
         """
-        if RightAscensionRate == None:
+        if RightAscensionRate is None:
             return self._get("rightascensionrate")
         self._put("rightascensionrate", RightAscensionRate=RightAscensionRate)
 
@@ -1463,7 +1433,7 @@ class Telescope(Device):
             Side of pier if not set.
         
         """
-        if SideOfPier == None:
+        if SideOfPier is None:
             return self._get("sideofpier")
         self._put("sideofpier", SideOfPier=SideOfPier)
 
@@ -1488,7 +1458,7 @@ class Telescope(Device):
             is located if not set.
 
         """
-        if SiteElevation == None:
+        if SiteElevation is None:
             return self._get("siteelevation")
         self._put("siteelevation", SiteElevation=SiteElevation)
 
@@ -1503,7 +1473,7 @@ class Telescope(Device):
             the telescope is located if not set.
         
         """
-        if SiteLatitude == None:
+        if SiteLatitude is None:
             return self._get("sitelatitude")
         self._put("sitelatitude", SiteLatitude=SiteLatitude)
 
@@ -1518,7 +1488,7 @@ class Telescope(Device):
             is located.
         
         """
-        if SiteLongitude == None:
+        if SiteLongitude is None:
             return self._get("sitelongitude")
         self._put("sitelongitude", SiteLongitude=SiteLongitude)
 
@@ -1542,7 +1512,7 @@ class Telescope(Device):
             Returns the post-slew settling time (sec.) if not set.
 
         """
-        if SlewSettleTime == None:
+        if SlewSettleTime is None:
             return self._get("slewsettletime")
         self._put("slewsettletime", SlewSettleTime=SlewSettleTime)
 
@@ -1557,7 +1527,7 @@ class Telescope(Device):
             or sync operation.
         
         """
-        if TargetDeclination == None:
+        if TargetDeclination is None:
             return self._get("targetdeclination")
         self._put("targetdeclination", TargetDeclination=TargetDeclination)
 
@@ -1572,7 +1542,7 @@ class Telescope(Device):
             operation.
 
         """
-        if TargetRightAscension == None:
+        if TargetRightAscension is None:
             return self._get("targetrightascension")
         self._put("targetrightascension", TargetRightAscension=TargetRightAscension)
 
@@ -1586,7 +1556,7 @@ class Telescope(Device):
             State of the telescope's sidereal tracking drive.
         
         """
-        if Tracking == None:
+        if Tracking is None:
             return self._get("tracking")
         self._put("tracking", Tracking=Tracking)
 
@@ -1601,7 +1571,7 @@ class Telescope(Device):
             Current tracking rate of the telescope's sidereal drive if not set.
         
         """
-        if TrackingRate == None:
+        if TrackingRate is None:
             return self._get("trackingrate")
         self._put("trackingrate", TrackingRate=TrackingRate)
 
@@ -1625,8 +1595,8 @@ class Telescope(Device):
             datetime of the UTC date/time if not set.
         
         """
-        if UTCDate == None:
-            return dateutil.parser.parse(self._get("utcdate"))
+        if UTCDate is None:
+            return self._get("utcdate")
 
         if type(UTCDate) is str:
             data = UTCDate
@@ -1804,38 +1774,235 @@ class Telescope(Device):
         self._put("unpark")
 
 
-class NumericError(Exception):
-    """Exception for when Alpaca throws an error with a numeric value.
-    
-    Args:
-        ErrorNumber (int): Non-zero integer.
-        ErrorMessage (str): Message describing the issue that was encountered.
-    
-    """
+class Focuser(Device):
+    """Focuser specific methods."""
 
-    def __init__(self, ErrorNumber: int, ErrorMessage: str):
-        """Initialize NumericError object."""
-        super().__init__(self)
-        self.message = "Error %d: %s" % (ErrorNumber, ErrorMessage)
+    def absolute(self) -> bool:
+        """Indicates whether the focuser is capable of absolute position
 
-    def __str__(self):
-        """Message to display with error."""
-        return self.message
+        Returns:
+            True if the focuser is capable of absolute position; that is, being commanded to a specific step location.
+        """
+        return self._get("absolute")
+
+    def ismoving(self) -> bool:
+        """Indicates whether the focuser is currently moving
+
+        Returns:
+            True if the focuser is currently moving to a new position. False if the focuser is stationary.
+        """
+        return self._get("ismoving")
+
+    def maxincrement(self) -> int:
+        """Returns the focuser's maximum increment size.
+
+        Returns:
+            Maximum increment size allowed by the focuser;
+            i.e. the maximum number of steps allowed in one move operation.
+        """
+        return self._get("maxincrement")
+
+    def maxstep(self) -> int:
+        """Returns the focuser's maximum step size.
+
+        Returns:
+            Maximum step position permitted.
+        """
+        return self._get("maxstep")
+
+    def position(self) -> int:
+        """Returns the focuser's current position.
+
+        Returns:
+            Current focuser position, in steps.
+        """
+        return self._get("position")
+
+    def stepsize(self) -> float:
+        """Returns the focuser's step size
+
+        Returns:
+            Step size (microns) for the focuser.
+        """
+        return self._get("stepsize")
+
+    def tempcomp(self, TempComp: Optional[bool] = None) -> Optional[bool]:
+        """Set or return the state of temperature compensation mode
+
+        Args:
+            TempComp (bool): Set true to enable the focuser's temperature compensation mode,
+            otherwise false for normal operation.
+
+        Returns:
+            Gets the state of temperature compensation mode (if available), else always False.
+
+        """
+        if TempComp is None:
+            return self._get("tempcomp")
+        self._put("tempcomp", TempComp=TempComp)
+
+    def tempcompavailable(self) -> bool:
+        """Indicates whether the focuser has temperature compensation
+
+        Returns:
+            True if focuser has temperature compensation available.
+        """
+        return self._get("tempcompavailable")
+
+    def temperature(self) -> float:
+        """Returns the focuser's current temperature
+
+        Returns:
+            Current ambient temperature as measured by the focuser.
+        """
+        return self._get("temperature")
+
+    def halt(self):
+        """Immediatley stops focuser motion
+
+        Notes:
+            Immediately stop any focuser motion due to a previous move() method call.
+        """
+        self._put("halt")
+
+    def move(self, Position: int):
+        """Moves the focuser to a new position
+
+        Notes:
+            Moves the focuser by the specified amount or to the specified position
+            depending on the value of the Absolute property.
+
+        Args:
+            Position (int): Step distance or absolute position, depending on the value of the Absolute property
+        """
+        self._put("move", Position=Position)
 
 
-class ErrorMessage(Exception):
-    """Exception for when Alpaca throws an error without a numeric value.
-    
-    Args:
-        Value (str): Message describing the issue that was encountered.
-    
-    """
+class Rotator(Device):
+    """Rotator specific methods."""
 
-    def __init__(self, Value: str):
-        """Initialize ErrorMessage object."""
-        super().__init__(self)
-        self.message = Value
+    def canreverse(self) -> bool:
+        """Indicates whether the Rotator supports the Reverse method
 
-    def __str__(self):
-        """Message to display with error."""
-        return self.message
+        Returns:
+            True if the Rotator supports the Reverse method.
+        """
+        return self._get("canreverse")
+
+    def ismoving(self) -> bool:
+        """Indicates whether the rotator is currently moving
+
+        Returns:
+            True if the rotator is capable of ismoving position; that is, being commanded to a specific step location.
+        """
+        return self._get("ismoving")
+
+    def mechanicalposition(self) -> float:
+        """Returns the rotator's mechanical current position
+
+        Returns:
+            Current instantaneous Rotator position, in degrees.
+        """
+        return self._get("mechanicalposition")
+
+    def position(self) -> float:
+        """Returns the rotator's current position
+
+        Returns:
+            Returns the raw mechanical position of the rotator in degrees.
+        """
+        return self._get("position")
+
+    def reverse(self, Reverse: Optional[bool] = None) -> Optional[bool]:
+        """Set or return the rotator’s Reverse state
+
+        Args:
+            Reverse (bool): True if the rotation and angular direction must
+            be reversed to match the optical characteristcs
+
+        Returns:
+            Returns the rotator’s Reverse state.
+        """
+        if Reverse is None:
+            return self._get("reverse")
+        self._put("reverse", Reverse=Reverse)
+
+    def stepsize(self) -> float:
+        """Returns the minimum StepSize
+
+        Returns:
+            The minimum StepSize, in degrees.
+        """
+        return self._get("stepsize")
+
+    def targetposition(self) -> float:
+        """Returns the destination position angle
+
+        Returns:
+            The destination position angle for Move() and MoveAbsolute().
+        """
+        return self._get("targetposition")
+
+    def halt(self):
+        """Immediatley stops rotator motion
+
+        Notes:
+            Immediately stop any Rotator motion due to a previous move() or moveabsolute() method call.
+        """
+        self._put("halt")
+
+    def move(self, Position: float):
+        """Moves the rotator to a new relative position
+
+        Notes:
+            Causes the rotator to move Position degrees relative to the current Position value.
+
+        Args:
+            Position (float): Relative position to move in degrees from current Position.
+        """
+        self._put("move", Position=Position)
+
+    def moveabsolute(self, Position: float):
+        """Moves the rotator to a new absolute position
+
+        Notes:
+            Causes the rotator to move the absolute position of Position degrees.
+
+        Args:
+            Position (float): Absolute position in degrees.
+        """
+        self._put("moveabsolute", Position=Position)
+
+    def movemechanical(self, Position: float):
+        """Moves the rotator to a new raw mechanical position
+
+        Notes:
+            Causes the rotator to move the mechanical position of Position degrees.
+
+        Args:
+            Position (float): Absolute position in degrees.
+        """
+        self._put("movemechanical", Position=Position)
+
+    def sync(self, Position: float):
+        """Syncs the rotator to the specified position angle without moving it
+
+        Notes:
+            Causes the rotator to sync to the position of Position degrees.
+
+        Args:
+            Position (float): Absolute position in degrees.
+        """
+        self._put("sync", Position=Position)
+
+
+_component_classes = {
+    'switch': Switch,
+    'safetymonitor': SafetyMonitor,
+    'dome': Dome,
+    'camera': Camera,
+    'filterwheel': FilterWheel,
+    'telescope': Telescope,
+    'focuser': Focuser,
+    'rotator': Rotator,
+}
