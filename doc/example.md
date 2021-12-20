@@ -1,12 +1,11 @@
 ## Example usage
 
-
 ```python
-from api import Observatory
+from ocaboxapi import Observatory
 
 observatory = Observatory()
 
-observatory.connect('alpaca')
+observatory.connect('default')
 
 luke = observatory.luke_telescope
 

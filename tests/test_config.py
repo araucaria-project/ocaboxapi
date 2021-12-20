@@ -1,6 +1,6 @@
 import unittest
 
-from api.config import Config
+from ocaboxapi.config import Config
 
 
 class ConfigTestCase(unittest.TestCase):

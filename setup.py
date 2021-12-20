@@ -1,18 +1,18 @@
-"""Setup Alpyca for distribution."""
+"""Setup ocaboxapi for distribution."""
 import setuptools
 
 with open("README.md", "r") as f:
     long_description = f.read()
 
 setuptools.setup(
-    name="ocabox",
+    name="ocaboxapi",
     description="Python interface for OCA Telescopes.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/araucaria-project/ocabox",
-    version="2.0.0",
+    url="https://github.com/araucaria-project/ocaboxapi",
+    version="3.0.2",
     license="LICENSE.txt",
-    py_modules=["ocabox"],
+    py_modules=["ocaboxapi"],
     install_requires=["requests", "python-dateutil", 'pyyaml'],
     classifiers=[
         "Programming Language :: Python :: 3",

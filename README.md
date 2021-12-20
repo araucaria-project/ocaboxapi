@@ -3,7 +3,11 @@ Common API for telesocpes.
 
 Based on [EthanChappel/Alpyca](https://github.com/araucaria-project/ocabox)
 
-
+# Developer Installation
+```bash
+ git clone https://github.com/araucaria-project/ocaboxapi.git
+ pip install -e ocaboxapi
+```
 
 
 ## Documentation

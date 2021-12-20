@@ -12,7 +12,7 @@ alpaca-simulated:
         kind: telescope
         name: Luke Skywalker imaginary telescope
         protocol: alpaca
-        address: http://localhost:1111/api/v1/
+        address: http://localhost:1111/api/v1
         device_number: 0
         components:
           derotator:

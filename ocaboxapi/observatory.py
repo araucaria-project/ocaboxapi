@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional, Union, List, MutableMapping, Any
 
-from api.config import Config
-from api.connectors import Connector
+from ocaboxapi.config import Config
+from ocaboxapi.connectors import Connector
 
 
 class Component:
@@ -26,7 +26,7 @@ class Component:
             child_options = self.component_options.pop('components')
         except KeyError:
             child_options = {}
-        for cid, op in child_options:
+        for cid, op in child_options.items():
             child = self._create_component(kind=op['kind'], sys_id=self._sys_id + '.' + cid, parent=self)
             self.children[cid] = child
             child._setup(op)
@@ -49,7 +49,10 @@ class Component:
 
     def __getattribute__(self, name: str) -> Any:
         """Access to children as another members"""
-        return self.children.get(name, super().__getattribute__(name))
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            return self.children.get(name)
 
     @classmethod
     def _create_component(cls, kind: str, sys_id: str, parent: 'Component') -> 'Component':
@@ -183,7 +186,7 @@ class Observatory(Device):
         configuration (Config): Optional configuration, by default configuration will be loaded from following files:
               ~/ocabox.cfg.yaml
               ./ocabox.cfg.yaml
-              <package_path>/api/default.cfg.yaml
+              <package_path>/ocaboxapi/default.cfg.yaml
             Later overwrites former
     """
 

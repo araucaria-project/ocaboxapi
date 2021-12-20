@@ -1,10 +1,10 @@
 import random
-from typing import Iterable, Callable
+from typing import Iterable, Callable, Tuple
 
 import requests
 
-from api.exceptions import NotImplementedMethodError, NumericError, ErrorMessage
-from api.observatory import Component
+from ocaboxapi.exceptions import NotImplementedMethodError, NumericError, ErrorMessage
+# from ocaboxapi.observatory import Component
 
 
 class Connector:
@@ -14,16 +14,16 @@ class Connector:
         connector = _connector_classes[protocol](*args, **kwargs)
         return connector
 
-    def get(self, component: Component, variable: str, **data):
+    def get(self, component: 'Component', variable: str, **data):
         raise NotImplementedMethodError
 
-    def put(self, component: Component, variable: str, **data):
+    def put(self, component: 'Component', variable: str, **data):
         raise NotImplementedMethodError
 
-    def call(self, component: Component, function: str, **data):
+    def call(self, component: 'Component', function: str, **data):
         raise NotImplementedMethodError
 
-    def subscribe(self, variables: Iterable[str, str], callback: Callable):
+    def subscribe(self, variables: Iterable[Tuple[str, str]], callback: Callable):
         raise NotImplementedMethodError
 
 
@@ -39,7 +39,7 @@ class AlpacaConnector(Connector):
     def configure_components(self):
         pass
 
-    def get(self, component: Component, variable: str, **data):
+    def get(self, component: 'Component', variable: str, **data):
         """Send an HTTP GET request to an Alpaca server and check response for errors.
 
         Args:
@@ -53,7 +53,7 @@ class AlpacaConnector(Connector):
         self.__check_error(response)
         return response.json()["Value"]
 
-    def put(self, component: Component, variable: str, **data):
+    def put(self, component: 'Component', variable: str, **data):
         """Send an HTTP PUT request to an Alpaca server and check response for errors.
 
         Args:
@@ -76,7 +76,7 @@ class AlpacaConnector(Connector):
         }
 
     @staticmethod
-    def _url(component: Component, variable: str):
+    def _url(component: 'Component', variable: str):
         url = '/'.join([
             component.get_option_recursive('address'),
             component.component_options['kind'],
