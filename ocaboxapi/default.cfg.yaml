@@ -1,18 +1,43 @@
 default:
-  include: alpaca-simulated
+  include: dibi-camk
 
-alpaca-simulated:
+dibi-camk:
   observatory:
-    name: Simulated ASA observatory
+    comment: Simulated on ASA computer in CAMK
+    lon: 24.627222    # Paranal
+    lat: -70.404167
+    elev: 2635.0
+    protocol: alpaca
+    address: http://localhost:11111/api/v1
+    components:
+      dibi:
+        kind: telescope
+        comment: DIBI Autoslew Simulated Telescope
+        device_number: 0
+        components:
+          derotator:
+            kind: rotator
+            device_number: 0  #  address will be taken from parent if not provided
+          focuser:
+            kind: focuser
+      second:
+        kind: telescope
+        comment: Unknown second telescope
+        device_number: 1
+
+
+sample-observatory:
+  observatory:
+    comment: Simulated ASA observatory
     lon: 24.627222    # Paranal
     lat: -70.404167
     elev: 2635.0
     components:
       ls:
         kind: telescope
-        name: Luke Skywalker imaginary telescope
+        comment: Luke Skywalker imaginary telescope
         protocol: alpaca
-        address: http://localhost:1111/api/v1
+        address: http://localhost:11111/api/v1
         device_number: 0
         components:
           derotator:

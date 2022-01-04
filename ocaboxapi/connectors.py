@@ -1,10 +1,17 @@
+
+
 import random
 from typing import Iterable, Callable, Tuple
 
 import requests
+from urllib3 import HTTPConnectionPool
 
-from ocaboxapi.exceptions import NotImplementedMethodError, NumericError, ErrorMessage
+from ocaboxapi.exceptions import AlpacaError, AlpacaHttpError, RequestConnectionError, AlpacaHttp400Error, \
+    AlpacaHttp500Error
 # from ocaboxapi.observatory import Component
+
+import logging
+log = logging.getLogger(__name__)
 
 
 class Connector:
@@ -15,22 +22,23 @@ class Connector:
         return connector
 
     def get(self, component: 'Component', variable: str, **data):
-        raise NotImplementedMethodError
+        raise NotImplementedError
 
     def put(self, component: 'Component', variable: str, **data):
-        raise NotImplementedMethodError
+        raise NotImplementedError
 
     def call(self, component: 'Component', function: str, **data):
-        raise NotImplementedMethodError
+        raise NotImplementedError
 
     def subscribe(self, variables: Iterable[Tuple[str, str]], callback: Callable):
-        raise NotImplementedMethodError
+        raise NotImplementedError
 
 
 class AlpacaConnector(Connector):
     def __init__(self) -> None:
         self.client_id = random.randint(0, 4294967295)
         self.session_id = 0
+        log.info('Alpaca connector created, ClientId=%d', self.client_id)
         super().__init__()
 
     def connect(*args, **kwargs):
@@ -38,6 +46,39 @@ class AlpacaConnector(Connector):
 
     def configure_components(self):
         pass
+
+    def scan_connection(self, address: str = 'http://localhost:11111/api/v1'):
+        properties = [
+            'name',
+            'description',
+            'connected',
+            'driverinfo',
+            'driverversion',
+            'interfaceversion',
+        ]
+        from .observatory import _component_classes
+        alpaca_devices = _component_classes.keys()
+        devices = []
+        for device in alpaca_devices:
+            i = 0
+            try:
+                while True:
+                    info = {'device': device, 'devicenumber': i}
+                    for prop in properties:
+                        url = '/'.join([
+                            address,
+                            device,
+                            str(i),
+                            prop
+                        ])
+                        r = self._get(url)
+                        info[prop] = r
+                    i += 1
+                    devices.append(info)
+            except AlpacaHttpError:
+                pass
+        return devices
+
 
     def get(self, component: 'Component', variable: str, **data):
         """Send an HTTP GET request to an Alpaca server and check response for errors.
@@ -48,9 +89,17 @@ class AlpacaConnector(Connector):
 
         """
         url = self._url(component=component, variable=variable)
+        return self._get(url, **data)
+
+    def _get(self, url, **data):
         data.update(self._base_data_for_request())
-        response = requests.get(url, data=data)
-        self.__check_error(response)
+        try:
+            response = requests.get(url, params=data)
+            self.__check_error(response)
+        except IOError as exc:
+            log.error(f'Connection to {url} failed')
+            raise RequestConnectionError from exc
+
         return response.json()["Value"]
 
     def put(self, component: 'Component', variable: str, **data):
@@ -63,8 +112,11 @@ class AlpacaConnector(Connector):
 
         """
         url = self._url(component=component, variable=variable)
+        return self._put(url, **data)
+
+    def _put(self, url, **data):
         data.update(self._base_data_for_request())
-        response = requests.put(url, data=data)
+        response = requests.put(url, params=data)
         self.__check_error(response)
         return response.json()
 
@@ -93,11 +145,16 @@ class AlpacaConnector(Connector):
             response (Response): Response from Alpaca server to check.
 
         """
+        if response.status_code == 400:
+            log.error(f'Alpaca HTTP 400 error, ({response.text}) for {response.url}')
+            raise AlpacaHttp400Error(response.text)
+        elif response.status_code == 500:
+            log.error(f'Alpaca HTTP 500 error, ({response.text}) for {response.url}')
+            raise AlpacaHttp500Error(response.text)
         j = response.json()
         if j["ErrorNumber"] != 0:
-            raise NumericError(j["ErrorNumber"], j["ErrorMessage"])
-        elif response.status_code == 400 or response.status_code == 500:
-            raise ErrorMessage(j["Value"])
+            log.error(f'Alpaca error, code={j["ErrorNumber"]}, msg={j["ErrorMessage"]}')
+            raise AlpacaError(j["ErrorNumber"], j["ErrorMessage"])
 
 
 _connector_classes = {

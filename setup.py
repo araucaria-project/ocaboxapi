@@ -22,4 +22,5 @@ setuptools.setup(
         "Topic :: Scientific/Engineering :: Astronomy",
         "License :: OSI Approved :: Apache Software License",
     ],
+    entry_points={"console_scripts":  ["olist = cli.olist:main"]},
 )

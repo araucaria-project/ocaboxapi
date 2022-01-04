@@ -1,19 +1,26 @@
+import logging
 import os.path
 from os import PathLike
 
 import yaml  # pip install pyyaml
 from typing import Optional, Iterable, Union
 
+logger = logging.getLogger(__name__)
 
 class Config:
     _singleton = None
+    default_files = [
+        os.path.join(os.path.dirname(__file__), 'default.cfg.yaml'),
+        os.path.expanduser('~/ocabox.cfg.yaml'),
+        './ocabox.cfg.yaml'
+    ]
 
     def __init__(self) -> None:
         self.data = {}
 
     @classmethod
     def global_config(cls) -> dict:
-        return cls.global_config()['protocol']
+        return cls.global_instance().data
 
     @classmethod
     def global_instance(cls) -> 'Config':
@@ -33,20 +40,16 @@ class Config:
 
     def read_config(self, source: Optional[Iterable[str]] = None) -> None:
         if not source:
-            source = [
-                os.path.join(os.path.dirname(__file__), 'default.cfg.yaml'),
-                os.path.expanduser('~/ocabox.cfg.yaml'),
-                './ocabox.cfg.yaml'
-            ]
+            source = self.default_files
         config = {}
         for src in source:
             try:
                 with open(src) as fd:
-                    print('Loading configuration from: ', src)
+                    logger.info('Loading configuration from: %s', src)
                     y = yaml.safe_load(fd)
                     config.update(y)
             except IOError:
-                pass
+                logger.info('Non existing config file: %s', src)
         # expand includes
         for k in config.keys():
             self.expand_includes(config, k)

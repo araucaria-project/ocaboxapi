@@ -1,8 +1,8 @@
-class NotImplementedMethodError(NotImplementedError):
+class DeviceResponseError(Exception):
     pass
 
 
-class NumericError(Exception):
+class AlpacaError(DeviceResponseError):
     """Exception for when Alpaca throws an error with a numeric value.
 
     Args:
@@ -21,7 +21,7 @@ class NumericError(Exception):
         return self.message
 
 
-class ErrorMessage(Exception):
+class AlpacaHttpError(DeviceResponseError):
     """Exception for when Alpaca throws an error without a numeric value.
 
     Args:
@@ -37,3 +37,15 @@ class ErrorMessage(Exception):
     def __str__(self):
         """Message to display with error."""
         return self.message
+
+
+class AlpacaHttp400Error(AlpacaHttpError):
+    pass
+
+
+class AlpacaHttp500Error(AlpacaHttpError):
+    pass
+
+
+class RequestConnectionError(IOError):
+    pass

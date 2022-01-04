@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Union, List, MutableMapping, Any
+from typing import Optional, Union, List, MutableMapping, Any, Mapping, Dict
 
 from ocaboxapi.config import Config
 from ocaboxapi.connectors import Connector
@@ -8,16 +8,17 @@ from ocaboxapi.connectors import Connector
 class Component:
     """Base class for all elements of device tree
     """
+
     def __init__(self, sys_id: str, parent: Union['Component', None]) -> None:
-        self._sys_id: str = sys_id
+        self.kind = type(self).__name__.lower()
+        self.sys_id: str = sys_id
         self.parent: Component = parent
         self.component_options = {}
         self._connector: Optional[Connector] = None
-        self.children = {}
+        self.children: dict[str, Component] = {}
 
     def _setup(self, options: dict):
         self.component_options: MutableMapping = options.copy()
-        self.name = self.component_options.get('name', self._sys_id)
         try:
             self._connector = Connector.create_connector(self.component_options['protocol'])
         except KeyError:
@@ -27,8 +28,9 @@ class Component:
         except KeyError:
             child_options = {}
         for cid, op in child_options.items():
-            child = self._create_component(kind=op['kind'], sys_id=self._sys_id + '.' + cid, parent=self)
+            child = self._create_component(kind=op['kind'], sys_id=self.sys_id + '.' + cid, parent=self)
             self.children[cid] = child
+            setattr(self, cid, child)  # allow easy navigation: `parent.child`
             child._setup(op)
 
     @property
@@ -47,16 +49,30 @@ class Component:
             else:
                 return self.parent.get_option_recursive(option)
 
-    def __getattribute__(self, name: str) -> Any:
-        """Access to children as another members"""
-        try:
-            return super().__getattribute__(name)
-        except AttributeError:
-            return self.children.get(name)
+    def children_tree_iter(self):
+        """Generator yielding components tree, starting from self """
+        yield self
+        for c in self.children.values():
+            yield from c.children_tree_iter()
 
     @classmethod
     def _create_component(cls, kind: str, sys_id: str, parent: 'Component') -> 'Component':
         return _component_classes[kind](sys_id=sys_id, parent=parent)
+
+    # def __getattribute__(self, name: str) -> Any:
+    #     """Access to children as another members"""
+    #     try:
+    #         return super().__getattribute__(name)
+    #     except AttributeError:
+    #         return self.children.get(name)
+
+    # @classmethod
+    # def class_name(cls):
+    #     return cls.__name__
+    #
+    # @property
+    # def kind(self):
+
 
 
 class Observatory(Component):
@@ -83,6 +99,8 @@ class Observatory(Component):
         Args:
             preset: name of the preset from config
         """
+        if preset is None:
+            preset = 'default'
         self.preset = preset
         options = self.config.data[preset]['observatory']
         self._setup(options)
@@ -2000,12 +2018,12 @@ class Rotator(Device):
 
 
 _component_classes = {
-    'switch': Switch,
-    'safetymonitor': SafetyMonitor,
+    'telescope': Telescope,
     'dome': Dome,
     'camera': Camera,
     'filterwheel': FilterWheel,
-    'telescope': Telescope,
     'focuser': Focuser,
     'rotator': Rotator,
+    'switch': Switch,
+    'safetymonitor': SafetyMonitor,
 }
