@@ -4,7 +4,7 @@ Common API for telescopes.
 Uses [EthanChappel/Alpyca](https://github.com/araucaria-project/ocabox) classes for
 ASCOM Alpaca API.
 
-# Developer Installation
+## Developer Installation
 ```bash
  git clone https://github.com/araucaria-project/ocaboxapi.git
  pip install -e ocaboxapi

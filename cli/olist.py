@@ -10,6 +10,7 @@ import argparse
 import logging
 
 from tabulate import tabulate
+from tqdm import tqdm
 
 from ocaboxapi import Observatory
 from ocaboxapi.config import Config
@@ -20,6 +21,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, epilog=f'Config files:{" ".join(Config.default_files)}')
     parser.add_argument('-p', '--preset', help='configuration preset; if not provided, program will lookup for preset '
                                                'named "default" in configuration file(s)')
+    parser.add_argument('-N', '--noprogress', action='store_true',
+                        help='do not show progress bar')
     # parser.add_argument('-c', '--config', metavar='FILE',
     #                     help='configuration file; if provided will be parsed after default config files')
     parser.add_argument('-v', '--verbose', action="count", default=0,
@@ -37,7 +40,10 @@ def main():
 
     # 3. Iteration of all children of Observatory object
     children = []
-    for c in obs.children_tree_iter():
+
+    #  tqdm creates progressbar, obs.children_tree_iter() is an iterator
+    for c in tqdm(obs.children_tree_iter(),
+                  total=obs.children_count() + 1, leave=False, colour='green', disable=args.noprogress):
         row_part1 = [c.kind, c.sys_id]
         try:  # connection may fail, Component may not be a Device
             row_part2 = [

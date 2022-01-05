@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from ocaboxapi.config import Config
@@ -11,7 +12,8 @@ class ConfigTestCase(unittest.TestCase):
         self.assertEqual(c1, c2)
 
     def test_default(self):
-        x = Config.global_config()['default']['observatory']['components']['ls']['kind']
+        cfg = Config.instance_from_files([os.path.join(os.path.dirname(__file__), 'test.cfg.yaml')])
+        x = cfg.data['default']['observatory']['components']['t1']['kind']
         self.assertEqual(x, 'telescope')
 
 

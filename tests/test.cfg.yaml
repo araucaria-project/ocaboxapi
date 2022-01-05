@@ -1,0 +1,25 @@
+default:
+  include: test
+
+test:
+  observatory:
+    comment: unit tests observatory
+    lon: 24.627222    # Paranal
+    lat: -70.404167
+    elev: 2635.0
+    protocol: alpaca
+    address: http://localhost:11111/api/v1
+    components:
+      t1:
+        kind: telescope
+        comment: test telescope
+        components:
+          derotator:
+            kind: rotator
+            device_number: 0  #  address will be taken from parent if not provided
+          focuser:
+            kind: focuser
+      t2:
+        kind: telescope
+        comment: Unknown second telescope
+        device_number: 1

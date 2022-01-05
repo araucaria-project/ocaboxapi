@@ -1,8 +1,12 @@
+import logging
 from datetime import datetime
-from typing import Optional, Union, List, MutableMapping, Any, Mapping, Dict
+from typing import Optional, Union, List, MutableMapping
 
 from ocaboxapi.config import Config
 from ocaboxapi.connectors import Connector
+from ocaboxapi.coo import check_equatorial_coordinates, check_horizontal_coordinates
+
+logger = logging.getLogger(__name__)
 
 
 class Component:
@@ -54,6 +58,41 @@ class Component:
         yield self
         for c in self.children.values():
             yield from c.children_tree_iter()
+
+    def children_count(self, recursively=True):
+        """gets number of children"""
+        n = len(self.children)
+        if recursively:
+            for c in self.children.values():
+                n += c.children_count(recursively=True)
+        return n
+
+    def child_by_relative_sys_id(self, sys_id_rel: str):
+        """Find child by relative sys_id path"""
+        cid, *cpath = sys_id_rel.split('.', 1)
+        c = self.children[cid]
+        if cpath:
+            return c.child_by_relative_sys_id(cpath[0])
+        else:
+            return c
+
+    def component_by_absolute_sys_id(self, sys_id_abs: str):
+        cid, *cpath = sys_id_abs.split('.', 1)
+        root = self.root
+        if root.sys_id != cid:
+            raise IndexError('Absolute sys_id should start from root: %s', root.sys_id)
+        if cpath:
+            return root.child_by_relative_sys_id(cpath[0])
+        else:
+            return self
+
+
+    @property
+    def root(self):
+        if self.parent is not None:
+            return self.parent.root
+        else:
+            return self
 
     @classmethod
     def _create_component(cls, kind: str, sys_id: str, parent: 'Component') -> 'Component':
@@ -1422,12 +1461,12 @@ class Telescope(Device):
         """Return the telescope's right ascension coordinate.
 
         Returns:
-            The right ascension (hours) of the telescope's current equatorial
+            The right ascension (degrees) of the telescope's current equatorial
             coordinates, in the coordinate system given by the EquatorialSystem
             property.
 
         """
-        return self._get("rightascension")
+        return self._get("rightascension") / 24 * 360  # hourangle -> deg
 
     def rightascensionrate(self, RightAscensionRate: Optional[float] = None):
         """Set or return the telescope's right ascension tracking rate.
@@ -1537,7 +1576,7 @@ class Telescope(Device):
             return self._get("slewsettletime")
         self._put("slewsettletime", SlewSettleTime=SlewSettleTime)
 
-    def targetdeclination(self, TargetDeclination: Optional[float] = None):
+    def targetdeclination(self, TargetDeclination: Optional[Union[float, str]] = None):
         """Set or return the target declination of a slew or sync.
 
         Args:
@@ -1550,21 +1589,25 @@ class Telescope(Device):
         """
         if TargetDeclination is None:
             return self._get("targetdeclination")
+        _, TargetDeclination = check_equatorial_coordinates(0.0, TargetDeclination)
         self._put("targetdeclination", TargetDeclination=TargetDeclination)
 
-    def targetrightascension(self, TargetRightAscension: Optional[float] = None):
+    def targetrightascension(self, TargetRightAscension: Optional[Union[float, str]] = None):
         """Set or return the current target right ascension.
 
         Args:
-            TargetRightAscension (float): Target right ascension (hours).
+            TargetRightAscension (float or str): Right Ascension coordinate (degrees if float, hours if str).
         
         Returns:
-            Right ascension (hours) for the target of an equatorial slew or sync
-            operation.
+            Right ascension (float) for the target of an equatorial slew or sync
+            operation (degrees).
 
         """
+
         if TargetRightAscension is None:
-            return self._get("targetrightascension")
+            return self._get("targetrightascension") / 24 * 360 # hourangle -> deg
+        TargetRightAscension, _ = check_equatorial_coordinates(TargetRightAscension, 0.0)
+        TargetRightAscension = TargetRightAscension / 360 * 24  # deg -> hour angle
         self._put("targetrightascension", TargetRightAscension=TargetRightAscension)
 
     def tracking(self, Tracking: Optional[bool] = None):
@@ -1651,13 +1694,12 @@ class Telescope(Device):
         """
         return self._get("canmoveaxis", Axis=Axis)
 
-    def destinationsideofpier(self, RightAscension: float, Declination: float):
+    def destinationsideofpier(self, RightAscension: Union[float, str], Declination: Union[float, str]):
         """Predict the pointing state after a German equatorial mount slews to given coordinates.
 
         Args:
-            RightAscension (float): Right Ascension coordinate (0.0 to 23.99999999
-                hours).
-            Declination (float): Declination coordinate (-90.0 to +90.0 degrees).
+            RightAscension (float or str): Right Ascension coordinate (degrees if float, hours if str).
+            Declination (float or str): Declination coordinate (degrees).
 
         Returns:
             Pointing state that a German equatorial mount will be in if it slews to the
@@ -1665,6 +1707,10 @@ class Telescope(Device):
             1 = pierWest, -1 = pierUnknown.
 
         """
+
+        RightAscension, Declination = check_equatorial_coordinates(RightAscension, Declination)
+        RightAscension = RightAscension / 360 * 24  # deg -> hour angle
+
         return self._get(
             "destinationsideofpier",
             RightAscension=RightAscension,
@@ -1707,48 +1753,54 @@ class Telescope(Device):
         """Set the telescope's park position."""
         self._put("setpark")
 
-    def slewtoaltaz(self, Azimuth: float, Altitude: float):
+    def slewtoaltaz(self, Azimuth: Union[float, str], Altitude: Union[float, str]):
         """Slew synchronously to the given local horizontal coordinates.
 
         Args:
-            Azimuth (float): Azimuth coordinate (degrees, North-referenced, positive
+            Azimuth (float or str): Azimuth coordinate (degrees, North-referenced, positive
                 East/clockwise).
-            Altitude (float): Altitude coordinate (degrees, positive up).
+            Altitude (float or str): Altitude coordinate (degrees, positive up).
 
         """
+        Azimuth, Altitude = check_horizontal_coordinates(Azimuth, Altitude)
         self._put("slewtoaltaz", Azimuth=Azimuth, Altitude=Altitude)
 
-    def slewtoaltazasync(self, Azimuth: float, Altitude: float):
+    def slewtoaltazasync(self, Azimuth: Union[float, str], Altitude: Union[float, str]):
         """Slew asynchronously to the given local horizontal coordinates.
 
         Args:
-            Azimuth (float): Azimuth coordinate (degrees, North-referenced, positive
+            Azimuth (float or str): Azimuth coordinate (degrees, North-referenced, positive
                 East/clockwise).
-            Altitude (float): Altitude coordinate (degrees, positive up).
+            Altitude (float or str): Altitude coordinate (degrees, positive up).
 
         """
+        Azimuth, Altitude = check_horizontal_coordinates(Azimuth, Altitude)
         self._put("slewtoaltazasync", Azimuth=Azimuth, Altitude=Altitude)
 
-    def slewtocoordinates(self, RightAscension: float, Declination: float):
+    def slewtocoordinates(self, RightAscension: Union[float, str], Declination: Union[float, str]):
         """Slew synchronously to the given equatorial coordinates.
 
         Args:
-            RightAscension (float): Right Ascension coordinate (hours).
-            Declination (float): Declination coordinate (degrees).
+            RightAscension (float or str): Right Ascension coordinate (degrees if float, hours if str).
+            Declination (float or str): Declination coordinate (degrees).
 
         """
+        RightAscension, Declination = check_equatorial_coordinates(RightAscension, Declination)
+        RightAscension = RightAscension / 360 * 24  # deg -> hour angle
         self._put(
             "slewtocoordinates", RightAscension=RightAscension, Declination=Declination
         )
 
-    def slewtocoordinatesasync(self, RightAscension: float, Declination: float):
+    def slewtocoordinatesasync(self, RightAscension: Union[float, str], Declination: Union[float, str]):
         """Slew asynchronously to the given equatorial coordinates.
 
         Args:
-            RightAscension (float): Right Ascension coordinate (hours).
-            Declination (float): Declination coordinate (degrees).
+            RightAscension (float or str): Right Ascension coordinate (degrees if float, hours if str).
+            Declination (float or str): Declination coordinate (degrees).
         
         """
+        RightAscension, Declination = check_equatorial_coordinates(RightAscension, Declination)
+        RightAscension = RightAscension / 360 * 24  # deg -> hour angle
         self._put(
             "slewtocoordinatesasync",
             RightAscension=RightAscension,
@@ -1763,25 +1815,28 @@ class Telescope(Device):
         """Asynchronously slew to the TargetRightAscension and TargetDeclination coordinates."""
         self._put("slewtotargetasync")
 
-    def synctoaltaz(self, Azimuth: float, Altitude: float):
+    def synctoaltaz(self, Azimuth: Union[float, str], Altitude: Union[float, str]):
         """Sync to the given local horizontal coordinates.
 
         Args:
-            Azimuth (float): Azimuth coordinate (degrees, North-referenced, positive
+            Azimuth (float or str): Azimuth coordinate (degrees, North-referenced, positive
                 East/clockwise).
-            Altitude (float): Altitude coordinate (degrees, positive up).
+            Altitude (float or str): Altitude coordinate (degrees, positive up).
 
         """
+        Azimuth, Altitude = check_horizontal_coordinates(Azimuth, Altitude)
         self._put("synctoaltaz", Azimuth=Azimuth, Altitude=Altitude)
 
-    def synctocoordinates(self, RightAscension: float, Declination: float):
+    def synctocoordinates(self, RightAscension: Union[float, str], Declination: Union[float, str]):
         """Sync to the given equatorial coordinates.
 
         Args:
-            RightAscension (float): Right Ascension coordinate (hours).
-            Declination (float): Declination coordinate (degrees).
+            RightAscension (float or str): Right Ascension coordinate (degrees if float, hours if str).
+            Declination (float or str): Declination coordinate (degrees).
 
         """
+        RightAscension, Declination = check_equatorial_coordinates(RightAscension, Declination)
+        RightAscension = RightAscension / 360 * 24  # deg -> hour angle
         self._put(
             "synctocoordinates", RightAscension=RightAscension, Declination=Declination
         )

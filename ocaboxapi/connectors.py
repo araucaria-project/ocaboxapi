@@ -116,7 +116,7 @@ class AlpacaConnector(Connector):
 
     def _put(self, url, **data):
         data.update(self._base_data_for_request())
-        response = requests.put(url, params=data)
+        response = requests.put(url, data=data)
         self.__check_error(response)
         return response.json()
 
